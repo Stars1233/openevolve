@@ -75,7 +75,7 @@ The evolved algorithm shows substantial improvement in finding better solutions:
 | Metric | Concorde (exact solver) | UTSP | UTSP (evolved) |
 |--------|-------|-------|-------|
 | Mean Tour Length | 23.12 | 23.39 | 23.30 |
-| Average Execution Time | 6.65h | 6.02m | 2.67m |
+| Average Execution Time | 6.65h | 3.35m | 28.27m |
 
 Larger comparison table with more related methods can be found in the original UTSP paper: [arXiv](https://arxiv.org/abs/2303.10538).
 
