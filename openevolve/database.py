@@ -1067,8 +1067,8 @@ class ProgramDatabase:
             other = self.programs[pid]
 
             if other.embedding is None:
-                logger.log(
-                    "Warning: Program %s has no embedding, skipping similarity check", other.id
+                logger.warning(
+                    f"Program {other.id} has no embedding, skipping similarity check"
                 )
                 continue
 
