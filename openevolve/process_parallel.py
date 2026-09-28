@@ -40,6 +40,7 @@ class SerializableResult:
     iteration: int = 0
     error: Optional[str] = None
     target_island: Optional[int] = None  # Island where child should be placed
+    token_usage: Optional[Dict[str, Any]] = None
 
 
 def _worker_init(config_dict: dict, evaluation_file: str, parent_env: dict = None) -> None:
@@ -209,13 +210,16 @@ def _run_iteration_worker(
                     messages=[{"role": "user", "content": prompt["user"]}],
                 )
             )
+            token_usage = getattr(_worker_llm_ensemble, "last_usage", None)
         except Exception as e:
             logger.error(f"LLM generation failed: {e}")
             return SerializableResult(error=f"LLM generation failed: {str(e)}", iteration=iteration)
 
         # Check for None response
         if llm_response is None:
-            return SerializableResult(error="LLM returned None response", iteration=iteration)
+            return SerializableResult(
+                error="LLM returned None response", iteration=iteration, token_usage=token_usage
+            )
 
         # Parse response based on evolution mode
         if _worker_config.diff_based_evolution:
@@ -230,7 +234,9 @@ def _run_iteration_worker(
             diff_blocks = extract_diffs(llm_response, _worker_config.diff_pattern)
             if not diff_blocks:
                 return SerializableResult(
-                    error="No valid diffs found in response", iteration=iteration
+                    error="No valid diffs found in response",
+                    iteration=iteration,
+                    token_usage=token_usage,
                 )
 
             if _worker_config.prompt.programs_as_changes_description:
@@ -241,7 +247,9 @@ def _run_iteration_worker(
                         changes_description_text=parent_changes_desc,
                     )
                 except Exception as e:
-                    return SerializableResult(error=str(e), iteration=iteration)
+                    return SerializableResult(
+                        error=str(e), iteration=iteration, token_usage=token_usage
+                    )
 
                 child_code, _ = apply_diff_blocks(parent.code, code_blocks)
                 child_changes_desc, desc_applied = apply_diff_blocks(
@@ -257,6 +265,7 @@ def _run_iteration_worker(
                     return SerializableResult(
                         error="changes_description was not updated or empty, program is discarded",
                         iteration=iteration,
+                        token_usage=token_usage,
                     )
 
                 changes_summary = format_diff_summary(
@@ -278,7 +287,9 @@ def _run_iteration_worker(
             new_code = parse_full_rewrite(llm_response, _worker_config.language)
             if not new_code:
                 return SerializableResult(
-                    error=f"No valid code found in response", iteration=iteration
+                    error=f"No valid code found in response",
+                    iteration=iteration,
+                    token_usage=token_usage,
                 )
 
             child_code = new_code
@@ -289,6 +300,7 @@ def _run_iteration_worker(
             return SerializableResult(
                 error=f"Generated code exceeds maximum length ({len(child_code)} > {_worker_config.max_code_length})",
                 iteration=iteration,
+                token_usage=token_usage,
             )
 
         # Evaluate the child program
@@ -314,6 +326,7 @@ def _run_iteration_worker(
                 "changes": changes_summary,
                 "parent_metrics": parent.metrics,
                 "island": parent_island,
+                "token_usage": token_usage,
             },
         )
 
@@ -331,6 +344,7 @@ def _run_iteration_worker(
             artifacts=artifacts,
             iteration=iteration,
             target_island=target_island,
+            token_usage=token_usage,
         )
 
     except Exception as e:
@@ -619,6 +633,10 @@ class ProcessParallelController:
 
         next_iteration = current_iteration
         completed_iterations = 0
+        total_prompt_tokens = 0
+        total_completion_tokens = 0
+        total_tokens = 0
+        total_llm_calls = 0
 
         # Early stopping tracking
         early_stopping_enabled = self.config.early_stopping_patience is not None
@@ -664,8 +682,21 @@ class ProcessParallelController:
                 timeout_seconds = self.config.evaluator.timeout + 30
                 result = future.result(timeout=timeout_seconds)
 
+                token_str = ""
+                if result.token_usage:
+                    pt = result.token_usage.get("prompt_tokens", 0)
+                    ct = result.token_usage.get("completion_tokens", 0)
+                    tt = result.token_usage.get("total_tokens", 0)
+                    total_prompt_tokens += pt
+                    total_completion_tokens += ct
+                    total_tokens += tt
+                    total_llm_calls += 1
+                    token_str = f" | tokens: {tt} (prompt: {pt}, completion: {ct})"
+
                 if result.error:
-                    logger.warning(f"Iteration {completed_iteration} error: {result.error}")
+                    logger.warning(
+                        f"Iteration {completed_iteration} error: {result.error}{token_str}"
+                    )
                 elif result.child_program_dict:
                     # Reconstruct program from dict
                     child_program = Program(**result.child_program_dict)
@@ -708,6 +739,7 @@ class ProcessParallelController:
                                 metadata={
                                     "iteration_time": result.iteration_time,
                                     "changes": child_program.metadata.get("changes", ""),
+                                    "token_usage": result.token_usage,
                                 },
                             )
 
@@ -722,6 +754,7 @@ class ProcessParallelController:
                             program_id=child_program.id,
                             prompt=result.prompt,
                             responses=[result.llm_response] if result.llm_response else [],
+                            token_usage=result.token_usage,
                         )
 
                     # Island management
@@ -741,7 +774,7 @@ class ProcessParallelController:
                         f"Iteration {completed_iteration}: "
                         f"Program {child_program.id} "
                         f"(parent: {result.parent_id}) "
-                        f"completed in {result.iteration_time:.2f}s"
+                        f"completed in {result.iteration_time:.2f}s{token_str}"
                     )
 
                     if child_program.metrics:
@@ -916,6 +949,13 @@ class ProcessParallelController:
             logger.info("✅ Evolution completed - Shutdown requested")
         else:
             logger.info("✅ Evolution completed - Maximum iterations reached")
+
+        if total_llm_calls > 0:
+            logger.info(
+                f"📊 Total LLM Token Usage ({total_llm_calls} calls): "
+                f"total_tokens={total_tokens} "
+                f"(prompt_tokens={total_prompt_tokens}, completion_tokens={total_completion_tokens})"
+            )
 
         return self.database.get_best_program()
 

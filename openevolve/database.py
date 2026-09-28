@@ -2773,8 +2773,9 @@ class ProgramDatabase:
         self,
         program_id: str,
         template_key: str,
-        prompt: Dict[str, str],
+        prompt: Dict[str, Any],
         responses: Optional[List[str]] = None,
+        token_usage: Optional[Dict[str, Any]] = None,
     ) -> None:
         """
         Log a prompt for a program.
@@ -2785,6 +2786,7 @@ class ProgramDatabase:
         template_key: Key for the prompt template
         prompt: Prompts in the format {template_key: { 'system': str, 'user': str }}.
         responses: Optional list of responses to the prompt, if available.
+        token_usage: Optional token usage dictionary for this LLM call.
         """
 
         if not self.config.log_prompts:
@@ -2793,6 +2795,8 @@ class ProgramDatabase:
         if responses is None:
             responses = []
         prompt["responses"] = responses
+        if token_usage is not None:
+            prompt["token_usage"] = token_usage
 
         if self.prompts_by_program is None:
             self.prompts_by_program = {}
