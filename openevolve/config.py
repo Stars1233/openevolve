@@ -372,6 +372,9 @@ class DatabaseConfig:
 
     novelty_llm: Optional["LLMInterface"] = None
     embedding_model: Optional[str] = None
+    # OpenAI-compatible base URL for embeddings (e.g. OpenRouter or a local server);
+    # falls back to the OPENAI_EMBEDDING_BASE_URL environment variable
+    embedding_api_base: Optional[str] = None
     similarity_threshold: float = 0.99
 
 
@@ -442,6 +445,8 @@ class Config:
     # Evolution settings
     diff_based_evolution: bool = True
     max_code_length: int = 10000
+    # Revert any LLM edits outside the EVOLVE-BLOCK-START/END regions
+    enforce_evolve_blocks: bool = False
     diff_pattern: str = r"<<<<<<< SEARCH\n(.*?)=======\n(.*?)>>>>>>> REPLACE"
 
     # Early stopping settings
